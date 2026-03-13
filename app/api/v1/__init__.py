@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.core.dependency import DependPermission
 
+from .ai import router as ai_router
 from .apis import apis_router
 from .auditlog import auditlog_router
 from .base import base_router
@@ -21,3 +22,4 @@ v1_router.include_router(apis_router, prefix="/api", dependencies=[DependPermiss
 v1_router.include_router(depts_router, prefix="/dept", dependencies=[DependPermission])
 v1_router.include_router(auditlog_router, prefix="/auditlog", dependencies=[DependPermission])
 v1_router.include_router(education_router, dependencies=[DependPermission])
+v1_router.include_router(ai_router, dependencies=[DependPermission])

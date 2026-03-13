@@ -21,3 +21,5 @@ db.sqlite3-wal
 
 # 服务器部署配置（包含敏感信息）
 .qoder/rules/alicloud_bushu.md
+add_ai_menu.sql
+.qoder/rules/agent_plan.md

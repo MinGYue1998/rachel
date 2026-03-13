@@ -426,6 +426,15 @@ INSERT INTO `menu` (`name`, `menu_type`, `icon`, `path`, `order`, `parent_id`, `
 ('缴费记录', 'menu', 'carbon:wallet', 'payment', 5, @education_parent_id, 0, '/education/payment', 0),
 ('统计报表', 'menu', 'carbon:chart-bar', 'report', 6, @education_parent_id, 0, '/education/report', 0);
 
+-- AI助手(目录)
+INSERT INTO `menu` (`name`, `menu_type`, `icon`, `path`, `order`, `parent_id`, `is_hidden`, `component`, `keepalive`, `redirect`) VALUES
+('AI助手', 'catalog', 'carbon:machine-learning-model', '/ai', 3, 0, 0, 'Layout', 0, '/ai/assistant');
+
+-- AI助手子菜单
+SET @ai_parent_id = LAST_INSERT_ID();
+INSERT INTO `menu` (`name`, `menu_type`, `icon`, `path`, `order`, `parent_id`, `is_hidden`, `component`, `keepalive`) VALUES
+('智能对话', 'menu', 'carbon:chat-bot', 'assistant', 1, @ai_parent_id, 0, '/ai/assistant', 1);
+
 -- ---------------------------------------------------
 -- 初始化部门
 -- ---------------------------------------------------

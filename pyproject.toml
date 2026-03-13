@@ -67,6 +67,7 @@ dependencies = [
     "watchfiles==1.0.4",
     "websockets==14.1",
     "asyncmy>=0.2.11",
+    "openai>=2.26.0",
 ]
 
 [tool.black]

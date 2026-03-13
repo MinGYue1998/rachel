@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
     DB_USER: str = "root"
-    DB_PASSWORD: str = ""
+    DB_PASSWORD: str = "l1234567l"
     DB_DATABASE: str = "rachel"
 
     @property
@@ -59,6 +59,10 @@ class Settings(BaseSettings):
         }
 
     DATETIME_FORMAT: str = "%Y-%m-%d %H:%M:%S"
+
+    # 通义千问API配置
+    DASHSCOPE_API_KEY: str = ""
+    QWEN_MODEL: str = "qwen-plus"
 
 
 settings = Settings()
