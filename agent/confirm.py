@@ -99,7 +99,20 @@ class ConfirmationManager:
     def _generate_understanding(self, tool_name: str, args: Dict[str, Any]) -> str:
         """生成对需求的理解"""
         
-        if tool_name == "create_class_record":
+        if tool_name == "create_student":
+            name = args.get("name", "未知")
+            phone = args.get("phone", "")
+            phone_info = f"，电话：{phone}" if phone else ""
+            return f"您想要新增学生 {name}{phone_info}"
+        
+        elif tool_name == "create_course":
+            name = args.get("name", "未知")
+            price = args.get("unit_price", 0)
+            teacher = args.get("teacher", "")
+            teacher_info = f"，授课老师：{teacher}" if teacher else ""
+            return f"您想要新增课程 {name}，课时单价 ¥{price:.2f}{teacher_info}"
+        
+        elif tool_name == "create_class_record":
             student = args.get("student_name", "未知")
             course = args.get("course_name", "未知")
             date = args.get("class_date", "今天")
@@ -135,7 +148,24 @@ class ConfirmationManager:
         
         consequences = []
         
-        if tool_name == "create_class_record":
+        if tool_name == "create_student":
+            name = args.get("name", "该学生")
+            consequences = [
+                f"将在系统中创建学生 {name} 的档案",
+                "该学生可以被添加到课程中",
+                "可以开始记录该学生的上课和缴费信息"
+            ]
+        
+        elif tool_name == "create_course":
+            name = args.get("name", "该课程")
+            price = args.get("unit_price", 0)
+            consequences = [
+                f"将在系统中创建课程 {name}",
+                f"课时单价为 ¥{price:.2f}",
+                "学生可以被添加到此课程中"
+            ]
+        
+        elif tool_name == "create_class_record":
             student = args.get("student_name", "该学生")
             hours = args.get("class_hours", 0)
             consequences = [

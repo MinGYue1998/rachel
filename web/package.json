@@ -23,6 +23,7 @@
     "dotenv": "^16.3.1",
     "eslint": "^8.46.0",
     "lodash-es": "^4.17.21",
+    "lucide-vue-next": "^0.577.0",
     "naive-ui": "^2.34.4",
     "pinia": "^2.1.6",
     "rollup-plugin-visualizer": "^5.9.2",
@@ -37,6 +38,7 @@
     "vite-plugin-svg-icons": "^2.0.1",
     "vue": "^3.3.4",
     "vue-i18n": "9",
+    "vue-markdown-stream": "^0.5.9",
     "vue-router": "^4.2.4"
   },
   "devDependencies": {

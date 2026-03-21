@@ -33,6 +33,24 @@ class StudentController(CRUDBase[Student, StudentCreate, StudentUpdate]):
     def __init__(self):
         super().__init__(model=Student)
 
+    async def get_list(self, name: str = None, status: str = None) -> List[dict]:
+        """获取学生列表（供AI助手使用）
+        
+        Args:
+            name: 学生姓名（模糊匹配）
+            status: 状态筛选（active=在读，inactive=已停用）
+        """
+        q = Q()
+        if name:
+            q &= Q(name__contains=name)
+        if status:
+            # status: active=在读(is_active=True), inactive=已停用(is_active=False)
+            is_active = status == "active"
+            q &= Q(is_active=is_active)
+        
+        students = await self.model.filter(q).all()
+        return [await s.to_dict() for s in students]
+
     async def get_active_students(self) -> List[Student]:
         """获取所有在读学生"""
         return await self.model.filter(is_active=True).all()
@@ -149,6 +167,25 @@ class CourseController(CRUDBase[Course, CourseCreate, CourseUpdate]):
     def __init__(self):
         super().__init__(model=Course)
 
+    async def get_list(self, name: str = None, teacher: str = None, status: str = None) -> List[dict]:
+        """获取课程列表（供AI助手使用）
+        
+        Args:
+            name: 课程名称（模糊匹配）
+            teacher: 教师姓名（模糊匹配）
+            status: 状态筛选（active=启用，inactive=停用）
+        """
+        q = Q()
+        if name:
+            q &= Q(name__contains=name)
+        if teacher:
+            q &= Q(teacher__contains=teacher)
+        if status:
+            q &= Q(status=status)
+        
+        courses = await self.model.filter(q).all()
+        return [await c.to_dict() for c in courses]
+
     async def get_active_courses(self) -> List[Course]:
         """获取所有启用的课程"""
         return await self.model.filter(status="active").all()
@@ -230,6 +267,27 @@ class CourseController(CRUDBase[Course, CourseCreate, CourseUpdate]):
 class ClassRecordController(CRUDBase[ClassRecord, ClassRecordCreate, ClassRecordUpdate]):
     def __init__(self):
         super().__init__(model=ClassRecord)
+
+    async def get_list(
+        self,
+        course_id: int = None,
+        student_id: int = None,
+        class_date_start: date = None,
+        class_date_end: date = None,
+    ) -> List[dict]:
+        """获取上课记录列表（供AI助手使用）"""
+        q = Q()
+        if course_id:
+            q &= Q(course_id=course_id)
+        if student_id:
+            q &= Q(attendances__student_id=student_id)
+        if class_date_start:
+            q &= Q(class_date__gte=class_date_start)
+        if class_date_end:
+            q &= Q(class_date__lte=class_date_end)
+        
+        records = await self.model.filter(q).distinct().all()
+        return [await r.to_dict() for r in records]
 
     async def search(
         self,
@@ -424,6 +482,47 @@ class ClassRecordController(CRUDBase[ClassRecord, ClassRecordCreate, ClassRecord
 
 class FeeController:
     """费用控制器"""
+
+    async def get_records(
+        self,
+        student_id: int = None,
+        course_id: int = None,
+        fee_type: str = None,
+    ) -> List[dict]:
+        """获取费用记录（供AI助手使用）"""
+        q = Q()
+        if student_id:
+            q &= Q(student_id=student_id)
+        if course_id:
+            q &= Q(course_id=course_id)
+        if fee_type:
+            q &= Q(fee_type=fee_type)
+        
+        records = await FeeRecord.filter(q).all()
+        return [await r.to_dict() for r in records]
+
+    async def get_arrears_students(self) -> List[dict]:
+        """获取欠费学生列表"""
+        # 使用SQL查询欠费学生
+        query = """
+            SELECT 
+                s.id as student_id,
+                s.name as student_name,
+                COALESCE(SUM(CASE WHEN fr.fee_type = 'class_fee' THEN fr.amount ELSE 0 END), 0) as total_fee,
+                COALESCE(SUM(CASE WHEN fr.fee_type = 'payment' THEN ABS(fr.amount) ELSE 0 END), 0) as total_paid,
+                COALESCE(SUM(CASE WHEN fr.fee_type = 'class_fee' THEN fr.amount ELSE 0 END), 0) - 
+                COALESCE(SUM(CASE WHEN fr.fee_type = 'payment' THEN ABS(fr.amount) ELSE 0 END), 0) as balance
+            FROM student s
+            LEFT JOIN fee_record fr ON s.id = fr.student_id
+            WHERE s.is_active = 1
+            GROUP BY s.id, s.name
+            HAVING balance > 0
+            ORDER BY balance DESC
+        """
+        from tortoise import Tortoise
+        conn = Tortoise.get_connection("default")
+        results = await conn.execute_query(query)
+        return [dict(r) for r in results[1]]
 
     async def get_fee_records(
         self,

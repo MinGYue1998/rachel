@@ -51,7 +51,7 @@ class HttpAuditLogMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.methods = methods
         self.exclude_paths = exclude_paths
-        self.audit_log_paths = ["/api/v1/auditlog/list"]
+        self.audit_log_paths = ["/api/v1/auditlog/list", "/api/v1/ai/"]
         self.max_body_size = 1024 * 1024  # 1MB 响应体大小限制
 
     async def get_request_args(self, request: Request) -> dict:

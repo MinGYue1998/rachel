@@ -15,7 +15,19 @@ import { configHtmlPlugin } from './html'
 import unplugin from './unplugin'
 
 export function createVitePlugins(viteEnv, isBuild) {
-  const plugins = [vue(), ...unplugin, configHtmlPlugin(viteEnv, isBuild), Unocss()]
+  const plugins = [
+    vue({
+      template: {
+        compilerOptions: {
+          // 将 deep-chat 标签视为自定义元素（Web Component）
+          isCustomElement: (tag) => tag === 'deep-chat'
+        }
+      }
+    }),
+    ...unplugin,
+    configHtmlPlugin(viteEnv, isBuild),
+    Unocss()
+  ]
 
   if (viteEnv.VITE_USE_COMPRESS) {
     plugins.push(viteCompression({ algorithm: viteEnv.VITE_COMPRESS_TYPE || 'gzip' }))

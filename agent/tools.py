@@ -172,8 +172,107 @@ TOOLS: List[Dict[str, Any]] = [
             }
         }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_time",
+            "description": "获取当前日期和时间，用于填写各种添加时间。返回格式：YYYY-MM-DD HH:MM:SS",
+            "parameters": {
+                "type": "object",
+                "properties": {}
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weekday_dates",
+            "description": "获取当月某个星期几的所有日期。例如：传入2，返回当月所有星期二的日期列表",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "weekday": {
+                        "type": "integer",
+                        "description": "星期几，1=星期一，2=星期二，...，7=星期日"
+                    }
+                },
+                "required": ["weekday"]
+            }
+        }
+    },
 
     # ==================== 写操作工具（需要用户确认）====================
+    {
+        "type": "function",
+        "function": {
+            "name": "create_student",
+            "description": "【需要确认】新增学生。创建学生档案，包含基本信息",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "学生姓名"
+                    },
+                    "phone": {
+                        "type": "string",
+                        "description": "联系电话（可选）"
+                    },
+                    "gender": {
+                        "type": "string",
+                        "enum": ["男", "女"],
+                        "description": "性别（可选）"
+                    },
+                    "guardian": {
+                        "type": "string",
+                        "description": "监护人姓名（可选）"
+                    },
+                    "guardian_phone": {
+                        "type": "string",
+                        "description": "监护人电话（可选）"
+                    },
+                    "address": {
+                        "type": "string",
+                        "description": "家庭住址（可选）"
+                    },
+                    "remark": {
+                        "type": "string",
+                        "description": "备注（可选）"
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_course",
+            "description": "【需要确认】新增课程。创建课程，设置课时单价和授课老师",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "课程名称"
+                    },
+                    "unit_price": {
+                        "type": "number",
+                        "description": "课时单价，如：100.00"
+                    },
+                    "teacher": {
+                        "type": "string",
+                        "description": "授课老师（可选）"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "课程描述（可选）"
+                    }
+                },
+                "required": ["name", "unit_price"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -294,6 +393,8 @@ TOOLS: List[Dict[str, Any]] = [
 
 # 写操作工具名称列表（用于判断是否需要确认）
 WRITE_TOOLS = {
+    "create_student",
+    "create_course",
     "create_class_record",
     "batch_create_class_records",
     "update_student_discount",

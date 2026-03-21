@@ -9,8 +9,14 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     """对话消息"""
     role: Literal["user", "assistant", "system", "tool"] = Field(..., description="消息角色")
-    content: str = Field(..., description="消息内容")
+    content: str = Field(default="", description="消息内容")
+    text: str = Field(default="", description="消息内容（兼容deep-chat格式）")
     tool_call_id: Optional[str] = Field(None, description="工具调用ID（tool角色时使用）")
+    
+    def model_post_init(self, __context):
+        """兼容处理：如果content为空但text有值，使用text"""
+        if not self.content and self.text:
+            self.content = self.text
 
 
 class ChatRequest(BaseModel):

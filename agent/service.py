@@ -61,7 +61,8 @@ class AIService:
             # 处理文本内容
             if delta.content:
                 collected_content += delta.content
-                yield f"data: {json.dumps({'type': 'text', 'content': delta.content})}\n\n"
+                # deep-chat 格式：直接返回文本
+                yield json.dumps({'text': delta.content}) + '\n'
             
             # 处理工具调用
             if delta.tool_calls:
@@ -98,11 +99,17 @@ class AIService:
                         arguments=tool_args,
                         user_id=user_id
                     )
-                    yield f"data: {json.dumps(confirmation)}\n\n"
+                    # deep-chat 格式：返回确认消息文本
+                    confirm_text = f"🤔 {confirmation['understanding']}\n\n"
+                    confirm_text += f"📋 操作：{confirmation['operation']['action']}\n"
+                    confirm_text += f"⚠️ 影响：{', '.join(confirmation['consequences'])}\n\n"
+                    confirm_text += f"{confirmation['message']}\n\n"
+                    confirm_text += f"📝 操作ID: {confirmation['operation_id']}"
+                    yield json.dumps({'text': confirm_text, 'confirmation': confirmation}) + '\n'
                     return
                 else:
                     # 只读操作，直接执行
-                    yield f"data: {json.dumps({'type': 'operation_executing', 'message': '正在查询...'})}\n\n"
+                    yield json.dumps({'text': '\n正在查询...\n'}) + '\n'
                     
                     result = await executor.execute(tool_name, tool_args)
                     
@@ -143,7 +150,8 @@ class AIService:
         async for chunk in response:
             delta = chunk.choices[0].delta
             if delta.content:
-                yield f"data: {json.dumps({'type': 'text', 'content': delta.content})}\n\n"
+                # deep-chat 格式
+                yield json.dumps({'text': delta.content}) + '\n'
     
     async def handle_confirmation(
         self,
@@ -164,33 +172,26 @@ class AIService:
         if not confirmed:
             # 用户取消
             confirmation_manager.cancel_operation(operation_id, user_id)
-            yield f"data: {json.dumps({'type': 'text', 'content': '操作已取消'})}\n\n"
+            yield json.dumps({'text': '❌ 操作已取消'}) + '\n'
             return
         
         # 确认操作
         pending = confirmation_manager.confirm_operation(operation_id, user_id)
         
         if not pending:
-            yield f"data: {json.dumps({'type': 'text', 'content': '操作已过期或不存在，请重新发起'})}\n\n"
+            yield json.dumps({'text': '⚠️ 操作已过期或不存在，请重新发起'}) + '\n'
             return
         
         # 执行操作
-        yield f"data: {json.dumps({'type': 'operation_executing', 'message': '正在执行操作...'})}\n\n"
+        yield json.dumps({'text': '\n正在执行操作...\n'}) + '\n'
         
         result = await executor.execute(pending.tool_name, pending.arguments)
         
         # 返回执行结果
         if result["success"]:
-            response = {
-                "type": "operation_completed",
-                "content": result["message"],
-                "data": result.get("data")
-            }
+            result_text = f"✅ {result['message']}\n"
+            if result.get("data"):
+                result_text += f"\n{json.dumps(result['data'], ensure_ascii=False, indent=2)}"
+            yield json.dumps({'text': result_text}) + '\n'
         else:
-            response = {
-                "type": "operation_failed",
-                "content": result["message"],
-                "error": result.get("data")
-            }
-        
-        yield f"data: {json.dumps(response)}\n\n"
+            yield json.dumps({'text': f"❌ {result['message']}"}) + '\n'

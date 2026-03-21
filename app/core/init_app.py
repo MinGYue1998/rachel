@@ -45,6 +45,8 @@ def make_middlewares():
                 "/openapi.json",
                 "/api/v1/education/reports/export",
                 "/api/v1/education/reports/export-excel",
+                "/api/v1/ai/chat",
+                "/api/v1/ai/confirm",
             ],
         ),
     ]

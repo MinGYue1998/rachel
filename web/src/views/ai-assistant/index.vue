@@ -1,173 +1,173 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { NButton, NCard, NSpace, NTag, NAlert, NSpin } from 'naive-ui'
-import 'deep-chat'
+import { ref, onMounted, computed, nextTick } from 'vue'
+import { NButton, NCard, NSpace, NTag, NAlert, NSpin, NDivider, NIcon, NInput } from 'naive-ui'
+import { 
+  Bot, 
+  MessageCircle, 
+  Sparkles, 
+  BookOpen, 
+  Users, 
+  Calendar, 
+  Wallet, 
+  FileText,
+  Send,
+  Loader2,
+  Check,
+  X
+} from 'lucide-vue-next'
+import VueMarkdownStream from 'vue-markdown-stream'
+import 'vue-markdown-stream/dist/index.css'
 
 import CommonPage from '@/components/page/CommonPage.vue'
 import { useUserStore } from '@/store'
+import { getToken } from '@/utils'
 
 const userStore = useUserStore()
-const chatRef = ref(null)
-const pendingConfirmation = ref(null)
+const token = getToken()
+const messages = ref([
+  {
+    role: 'ai',
+    content: '您好！我是您的教培管理助手 🤖\n\n我可以帮您管理学生、课程、上课记录和费用。\n\n请问有什么可以帮您？'
+  }
+])
+const inputMessage = ref('')
 const isLoading = ref(false)
+const messagesContainer = ref(null)
+const pendingConfirmation = ref(null) // 待确认的操作
 
-// 连接配置
-const connectConfig = computed(() => ({
-  url: '/api/v1/ai/chat',
-  method: 'POST',
-  headers: {
-    'Authorization': `Bearer ${userStore.token}`,
-    'Content-Type': 'application/json'
-  },
-  stream: true,
-  // 自定义请求处理，用于处理确认流程
-  handler: handleChatRequest
-}))
+// 自动滚动到底部
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
+  })
+}
 
-// 处理聊天请求
-async function handleChatRequest(body, signals) {
+// 解析确认消息，提取 operation_id
+function parseConfirmationMessage(text) {
+  // 检查是否是确认请求消息
+  if (text.includes('请确认是否执行此操作')) {
+    // 从消息中提取 operation_id（后端会在消息中包含）
+    // 这里我们假设后端会在流式响应中返回 operation_id
+    return true
+  }
+  return false
+}
+
+// 发送消息
+async function sendMessage(text = null) {
+  const messageText = text || inputMessage.value.trim()
+  if (!messageText || isLoading.value) return
+
+  // 添加用户消息
+  messages.value.push({ role: 'user', content: messageText })
+  inputMessage.value = ''
+  scrollToBottom()
+
+  // 准备 AI 回复占位
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ role: 'ai', content: '' })
+  isLoading.value = true
+
   try {
-    isLoading.value = true
-    
+    // 转换消息格式 - 将 'ai' 转换为 'assistant'
+    const requestBody = {
+      messages: messages.value
+        .filter(m => m.role === 'user' || m.role === 'ai')
+        .slice(0, -1) // 排除刚添加的空 AI 消息
+        .map(m => ({
+          role: m.role === 'ai' ? 'assistant' : m.role,
+          content: m.content
+        }))
+    }
+
     const response = await fetch('/api/v1/ai/chat', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${userStore.token}`,
+        'token': token,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(requestBody)
     })
-    
+
     if (!response.ok) {
       throw new Error('请求失败')
     }
-    
+
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
-    
+    let fullText = ''
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
-      
+
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
+      const lines = buffer.split('\n')
       buffer = lines.pop() || ''
-      
+
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            
-            // 处理确认请求
-            if (data.type === 'confirmation_required') {
-              pendingConfirmation.value = data
-              signals.onResponse({
-                text: formatConfirmationMessage(data),
-                html: generateConfirmationHTML(data)
-              })
-              isLoading.value = false
-              return
-            }
-            
-            // 处理执行中状态
-            if (data.type === 'operation_executing') {
-              signals.onResponse({ text: data.message })
-              continue
-            }
-            
-            // 处理执行完成
-            if (data.type === 'operation_completed') {
-              signals.onResponse({
-                text: data.content,
-                html: data.data ? formatResultHTML(data.data) : null
-              })
-              isLoading.value = false
-              return
-            }
-            
-            // 处理执行失败
-            if (data.type === 'operation_failed') {
-              signals.onResponse({
-                text: `❌ ${data.content}`,
-                error: data.error
-              })
-              isLoading.value = false
-              return
-            }
-            
-            // 普通文本响应
-            if (data.type === 'text' && data.content) {
-              signals.onResponse({ text: data.content })
-            }
-          } catch (e) {
-            console.error('解析响应失败:', e)
+        if (!line.trim()) continue
+        try {
+          const data = JSON.parse(line)
+          if (data.text) {
+            fullText += data.text
+            messages.value[aiMessageIndex].content = fullText
+            scrollToBottom()
           }
+          // 处理确认请求
+          if (data.confirmation) {
+            pendingConfirmation.value = data.confirmation
+            messages.value[aiMessageIndex].confirmation = data.confirmation
+          }
+        } catch (e) {
+          console.error('解析响应失败:', e, line)
         }
       }
     }
-    
-    isLoading.value = false
   } catch (error) {
+    messages.value[aiMessageIndex].content = '❌ ' + (error.message || '请求失败')
+  } finally {
     isLoading.value = false
-    signals.onResponse({ error: error.message || '请求失败' })
+    scrollToBottom()
   }
 }
 
-// 格式化确认消息
-function formatConfirmationMessage(data) {
-  let text = `🤔 ${data.understanding}\n\n`
-  text += `📋 操作详情：\n${JSON.stringify(data.operation.params, null, 2)}\n\n`
-  text += `⚠️ 可能产生的后果：\n`
-  data.consequences.forEach((c, i) => {
-    text += `${i + 1}. ${c}\n`
-  })
-  text += `\n${data.message}`
-  return text
-}
-
-// 生成确认按钮HTML
-function generateConfirmationHTML(data) {
-  return `
-    <div style="margin-top: 12px; padding: 12px; background: #f5f5f5; border-radius: 8px;">
-      <p style="margin: 0 0 8px 0; color: #666;">${data.understanding}</p>
-      <div style="margin: 8px 0;">
-        ${data.consequences.map(c => `<p style="margin: 4px 0; color: #ff4d4f;">⚠️ ${c}</p>`).join('')}
-      </div>
-      <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button onclick="window.confirmOperation('${data.operation_id}', true)" 
-                style="padding: 8px 16px; background: #52c41a; color: white; border: none; border-radius: 4px; cursor: pointer;">
-          ✅ 确认执行
-        </button>
-        <button onclick="window.confirmOperation('${data.operation_id}', false)"
-                style="padding: 8px 16px; background: #ff4d4f; color: white; border: none; border-radius: 4px; cursor: pointer;">
-          ❌ 取消
-        </button>
-      </div>
-    </div>
-  `
-}
-
-// 格式化结果HTML
-function formatResultHTML(data) {
-  if (!data) return null
-  return `
-    <div style="margin-top: 8px; padding: 12px; background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px;">
-      <pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${JSON.stringify(data, null, 2)}</pre>
-    </div>
-  `
-}
-
 // 确认操作
-async function confirmOperation(operationId, confirmed) {
-  try {
-    isLoading.value = true
+async function confirmOperation(confirmed, confirmation = null) {
+  // 如果没有传入 confirmation，使用全局 pendingConfirmation
+  const confirmationData = confirmation || pendingConfirmation.value
+  if (!confirmationData) return
+  
+  const operationId = confirmationData.operation_id
+  // 清除全局 pendingConfirmation
+  if (pendingConfirmation.value?.operation_id === operationId) {
     pendingConfirmation.value = null
-    
+  }
+  
+  // 清除消息中的 confirmation，防止重复点击
+  const msgIndex = messages.value.findIndex(m => m.confirmation?.operation_id === operationId)
+  if (msgIndex !== -1) {
+    messages.value[msgIndex].confirmation = null
+  }
+  
+  // 添加用户消息
+  const confirmText = confirmed ? '✅ 确认执行' : '❌ 取消操作'
+  messages.value.push({ role: 'user', content: confirmText })
+  scrollToBottom()
+  
+  // 准备 AI 回复占位
+  const aiMessageIndex = messages.value.length
+  messages.value.push({ role: 'ai', content: '' })
+  isLoading.value = true
+  
+  try {
     const response = await fetch('/api/v1/ai/confirm', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${userStore.token}`,
+        'token': token,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
@@ -177,7 +177,7 @@ async function confirmOperation(operationId, confirmed) {
     })
     
     if (!response.ok) {
-      throw new Error('确认请求失败')
+      throw new Error('请求失败')
     }
     
     const reader = response.body.getReader()
@@ -190,154 +190,534 @@ async function confirmOperation(operationId, confirmed) {
       if (done) break
       
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n\n')
+      const lines = buffer.split('\n')
       buffer = lines.pop() || ''
       
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            
-            if (data.type === 'text' && data.content) {
-              fullText += data.content
-            } else if (data.type === 'operation_completed') {
-              fullText = data.content
-              if (data.data) {
-                fullText += '\n\n' + JSON.stringify(data.data, null, 2)
-              }
-            } else if (data.type === 'operation_failed') {
-              fullText = '❌ ' + data.content
-            }
-          } catch (e) {
-            console.error('解析响应失败:', e)
+        if (!line.trim()) continue
+        try {
+          const data = JSON.parse(line)
+          if (data.text) {
+            fullText += data.text
+            messages.value[aiMessageIndex].content = fullText
+            scrollToBottom()
           }
+        } catch (e) {
+          console.error('解析响应失败:', e, line)
         }
       }
     }
-    
-    // 添加系统消息到聊天
-    if (chatRef.value) {
-      chatRef.value.addMessage({
-        text: fullText || (confirmed ? '✅ 操作已确认并执行' : '❌ 操作已取消'),
-        role: 'ai'
-      })
-    }
-    
-    isLoading.value = false
   } catch (error) {
+    messages.value[aiMessageIndex].content = '❌ ' + (error.message || '请求失败')
+  } finally {
     isLoading.value = false
-    if (chatRef.value) {
-      chatRef.value.addMessage({
-        text: '❌ ' + (error.message || '操作失败'),
-        role: 'ai'
-      })
-    }
+    scrollToBottom()
   }
 }
 
-// 注册全局函数供HTML调用
-onMounted(() => {
-  window.confirmOperation = confirmOperation
-})
+// 处理回车发送
+function handleKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    sendMessage()
+  }
+}
 
-// 示例问题
-const exampleQuestions = [
-  '有哪些学生？',
-  '张三上了多少次课？',
-  '本月有哪些欠费学生？',
-  '给张三添加一次上课记录，2课时',
-  '查询本月报表'
-]
-
+// 使用示例问题
 function askExample(question) {
-  if (chatRef.value) {
-    chatRef.value.submitUserMessage({ text: question })
-  }
+  inputMessage.value = question
+  sendMessage()
 }
+
+// 示例问题分类
+const exampleCategories = [
+  {
+    icon: Users,
+    title: '学生管理',
+    color: '#52c41a',
+    questions: ['有哪些学生？', '张三的联系方式是什么？', '新增学生李四，电话13800138000']
+  },
+  {
+    icon: BookOpen,
+    title: '课程管理',
+    color: '#1890ff',
+    questions: ['有哪些课程？', '数学课的课时费是多少？', '查询英语课程的上课记录']
+  },
+  {
+    icon: Calendar,
+    title: '上课记录',
+    color: '#722ed1',
+    questions: ['张三上了多少次课？', '给张三添加一次数学课记录，2课时', '本月有哪些上课记录？']
+  },
+  {
+    icon: Wallet,
+    title: '费用管理',
+    color: '#fa8c16',
+    questions: ['本月有哪些欠费学生？', '张三还欠多少课时费？', '记录张三缴费1000元']
+  },
+  {
+    icon: FileText,
+    title: '统计报表',
+    color: '#eb2f96',
+    questions: ['查询本月报表', '本月的收入统计', '各课程的学生人数统计']
+  }
+]
 </script>
 
 <template>
-  <CommonPage show-footer title="AI助手">
+  <CommonPage title="智能助手" :show-back="false">
     <div class="ai-assistant-container">
-      <!-- 示例问题 -->
-      <NCard class="mb-4" size="small">
-        <NSpace>
-          <span class="text-gray-500">示例问题：</span>
-          <NTag
-            v-for="q in exampleQuestions"
-            :key="q"
-            size="small"
-            class="cursor-pointer hover:bg-blue-100"
-            @click="askExample(q)"
-          >
-            {{ q }}
-          </NTag>
-        </NSpace>
-      </NCard>
+      <!-- 左侧：信息面板 -->
+      <div class="left-panel">
+        <NCard class="info-card" :bordered="false">
+          <div class="assistant-header">
+            <div class="assistant-avatar">
+              <NIcon :size="48" :component="Bot" color="#4472C4" />
+            </div>
+            <div class="assistant-info">
+              <h2>教培管理助手</h2>
+              <p>基于 AI 的智能助手</p>
+            </div>
+          </div>
 
-      <!-- 聊天组件 -->
-      <NCard class="chat-card">
-        <deep-chat
-          ref="chatRef"
-          :connect="connectConfig"
-          :intro-message="{ 
-            text: '您好！我是教培管理助手 🤖\n\n我可以帮您：\n• 查询学生、课程信息\n• 查看上课记录和费用\n• 生成月度报表\n• 管理上课记录和缴费\n\n请问有什么可以帮您？',
-            role: 'ai'
-          }"
-          :text-input="{ 
-            placeholder: { text: '请输入您的问题...' },
-            disabled: isLoading
-          }"
-          :submit-button-styles="{
-            submit: { 
-              container: { 
-                default: { backgroundColor: isLoading ? '#ccc' : '#4472C4' } 
-              } 
-            }
-          }"
-          :error-messages="{
-            displayServiceErrorMessages: true
-          }"
-          :avatars="{
-            ai: { src: 'https://api.dicebear.com/7.x/bottts/svg?seed=AI', styles: { avatar: { width: '36px', height: '36px' } } },
-            user: { src: 'https://api.dicebear.com/7.x/avataaars/svg?seed=User', styles: { avatar: { width: '36px', height: '36px' } } }
-          }"
-          :message-styles="{
-            default: { shared: { bubble: { backgroundColor: '#f5f5f5', maxWidth: '80%' } } }
-          }"
-          style="height: calc(100vh - 280px); border: none;"
-        />
-      </NCard>
+          <NDivider />
 
-      <!-- 使用说明 -->
-      <NAlert type="info" class="mt-4" :show-icon="true">
-        <template #header>
-          使用说明
-        </template>
-        <ul class="text-sm">
-          <li>• 查询类操作（如"有哪些学生"）会直接返回结果</li>
-          <li>• 写操作（如"添加记录"）需要您确认后才执行</li>
-          <li>• 支持自然语言，您可以像和人对话一样提问</li>
-          <li>• 确认操作有5分钟有效期，过期需重新发起</li>
-        </ul>
-      </NAlert>
+          <div class="capabilities">
+            <h3><NIcon :size="18" :component="Sparkles" /> 我能帮您做什么</h3>
+            <ul>
+              <li><span class="capability-dot query"></span>查询学生、课程信息</li>
+              <li><span class="capability-dot query"></span>查看上课记录和费用</li>
+              <li><span class="capability-dot write"></span>添加/修改上课记录</li>
+              <li><span class="capability-dot write"></span>记录缴费信息</li>
+              <li><span class="capability-dot report"></span>生成月度统计报表</li>
+            </ul>
+          </div>
+
+          <NDivider />
+
+          <div class="tips">
+            <h3><NIcon :size="18" :component="MessageCircle" /> 使用提示</h3>
+            <NAlert type="info" :show-icon="false" class="tip-alert">
+              <p>💡 查询类操作会直接返回结果</p>
+              <p>⚠️ 写操作需要您确认后才执行</p>
+              <p>⏰ 确认操作有5分钟有效期</p>
+            </NAlert>
+          </div>
+        </NCard>
+
+        <!-- 示例问题分类 -->
+        <NCard class="examples-card" title="💡 试试这些问题" :bordered="false">
+          <div class="example-categories">
+            <div 
+              v-for="category in exampleCategories" 
+              :key="category.title"
+              class="category-section"
+            >
+              <div class="category-header" :style="{ color: category.color }">
+                <NIcon :size="20" :component="category.icon" />
+                <span>{{ category.title }}</span>
+              </div>
+              <div class="category-questions">
+                <NTag
+                  v-for="q in category.questions"
+                  :key="q"
+                  size="small"
+                  class="question-tag"
+                  :style="{ borderColor: category.color + '40', color: category.color }"
+                  @click="askExample(q)"
+                >
+                  {{ q }}
+                </NTag>
+              </div>
+            </div>
+          </div>
+        </NCard>
+      </div>
+
+      <!-- 右侧：聊天区域 -->
+      <div class="right-panel">
+        <NCard class="chat-card" :bordered="false">
+          <!-- 消息列表 -->
+          <div ref="messagesContainer" class="messages-container">
+            <div
+              v-for="(message, index) in messages"
+              :key="index"
+              class="message-item"
+              :class="message.role"
+            >
+              <div class="message-avatar">
+                <img
+                  v-if="message.role === 'ai'"
+                  src="https://api.dicebear.com/7.x/bottts/svg?seed=AI"
+                  alt="AI"
+                />
+                <img
+                  v-else
+                  src="https://api.dicebear.com/7.x/avataaars/svg?seed=User"
+                  alt="User"
+                />
+              </div>
+              <div class="message-content">
+                <div class="message-bubble">
+                  <VueMarkdownStream
+                    v-if="message.role === 'ai' && message.content"
+                    :content="message.content"
+                  />
+                  <template v-else>{{ message.content }}</template>
+                </div>
+                <!-- 确认/取消按钮 -->
+                <div v-if="message.confirmation && message.confirmation.operation_id" class="confirmation-buttons">
+                  <NButton type="primary" :disabled="isLoading" @click="confirmOperation(true, message.confirmation)">
+                    <template #icon><NIcon :component="Check" /></template>
+                    确认执行
+                  </NButton>
+                  <NButton :disabled="isLoading" @click="confirmOperation(false, message.confirmation)">
+                    <template #icon><NIcon :component="X" /></template>
+                    取消操作
+                  </NButton>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 加载指示器 -->
+            <div v-if="isLoading" class="message-item ai loading">
+              <div class="message-avatar">
+                <img src="https://api.dicebear.com/7.x/bottts/svg?seed=AI" alt="AI" />
+              </div>
+              <div class="message-content">
+                <div class="message-bubble typing">
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                  <span class="dot"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 输入区域 -->
+          <div class="input-area">
+            <NInput
+              v-model:value="inputMessage"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              placeholder="请输入您的问题，例如：查询所有学生..."
+              :disabled="isLoading"
+              @keydown="handleKeydown"
+            />
+            <NButton
+              type="primary"
+              :disabled="!inputMessage.trim() || isLoading"
+              :loading="isLoading"
+              @click="sendMessage"
+            >
+              <template #icon>
+                <NIcon :component="Send" />
+              </template>
+              发送
+            </NButton>
+          </div>
+        </NCard>
+      </div>
     </div>
   </CommonPage>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .ai-assistant-container {
-  max-width: 1000px;
-  margin: 0 auto;
+  display: flex;
+  gap: 20px;
+  height: calc(100vh - 140px);
+  min-height: 600px;
 }
 
-.chat-card {
-  :deep(.n-card__content) {
-    padding: 0;
+.left-panel {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.right-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.info-card {
+  .assistant-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+
+    .assistant-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #e6f0ff 0%, #f0f7ff 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .assistant-info {
+      h2 {
+        margin: 0;
+        font-size: 20px;
+        color: #1a1a1a;
+      }
+
+      p {
+        margin: 4px 0 0;
+        color: #666;
+        font-size: 14px;
+      }
+    }
+  }
+
+  .capabilities {
+    h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: #1a1a1a;
+    }
+
+    ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+
+      li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        color: #555;
+        font-size: 14px;
+
+        .capability-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+
+          &.query {
+            background: #52c41a;
+          }
+
+          &.write {
+            background: #fa8c16;
+          }
+
+          &.report {
+            background: #eb2f96;
+          }
+        }
+      }
+    }
+  }
+
+  .tips {
+    h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px;
+      font-size: 15px;
+      color: #1a1a1a;
+    }
+
+    .tip-alert {
+      p {
+        margin: 4px 0;
+      }
+    }
   }
 }
 
-:deep(.deep-chat) {
-  --deep-chat-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+.examples-card {
+  flex: 1;
+  overflow-y: auto;
+
+  :deep(.n-card__content) {
+    padding: 16px;
+  }
+
+  .example-categories {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    .category-section {
+      .category-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 8px;
+      }
+
+      .category-questions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+
+        .question-tag {
+          cursor: pointer;
+          transition: all 0.2s;
+
+          &:hover {
+            opacity: 0.8;
+            transform: translateY(-1px);
+          }
+        }
+      }
+    }
+  }
+}
+
+.chat-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  :deep(.n-card__content) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .messages-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    .message-item {
+      display: flex;
+      gap: 12px;
+      max-width: 85%;
+
+      &.user {
+        align-self: flex-end;
+        flex-direction: row-reverse;
+
+        .message-bubble {
+          background: #4472C4;
+          color: white;
+          border-bottom-right-radius: 4px;
+        }
+      }
+
+      &.ai {
+        align-self: flex-start;
+
+        .message-bubble {
+          background: #f5f5f5;
+          color: #1a1a1a;
+          border-bottom-left-radius: 4px;
+        }
+      }
+
+      .message-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        overflow: hidden;
+        flex-shrink: 0;
+
+        img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+      }
+
+      .message-content {
+        .message-bubble {
+          padding: 12px 16px;
+          border-radius: 16px;
+          font-size: 14px;
+          line-height: 1.6;
+          word-break: break-word;
+
+          &.typing {
+            display: flex;
+            gap: 4px;
+            padding: 16px 20px;
+
+            .dot {
+              width: 8px;
+              height: 8px;
+              background: #999;
+              border-radius: 50%;
+              animation: typing 1.4s infinite;
+
+              &:nth-child(2) {
+                animation-delay: 0.2s;
+              }
+
+              &:nth-child(3) {
+                animation-delay: 0.4s;
+              }
+            }
+          }
+        }
+
+        .confirmation-buttons {
+          display: flex;
+          gap: 12px;
+          margin-top: 12px;
+          padding-left: 4px;
+        }
+      }
+    }
+  }
+
+  .input-area {
+    display: flex;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid #e8e8e8;
+    margin-top: 16px;
+
+    .n-input {
+      flex: 1;
+    }
+
+    .n-button {
+      align-self: flex-end;
+    }
+  }
+}
+
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-10px);
+  }
+}
+
+@media (max-width: 1024px) {
+  .ai-assistant-container {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .left-panel {
+    width: 100%;
+  }
+
+  .right-panel {
+    height: 600px;
+  }
 }
 </style>

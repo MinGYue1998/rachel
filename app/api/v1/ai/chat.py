@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from app.core.dependency import DependAuth
-from app.core.ctx import CTX_USER_ID
 from agent import AIService, ToolExecutor
 from agent.schemas import ChatRequest, ConfirmationResponse
 from agent.tools import TOOLS
@@ -15,15 +14,10 @@ from agent.tools import TOOLS
 router = APIRouter()
 
 
-def get_current_user_id() -> int:
-    """获取当前用户ID"""
-    return CTX_USER_ID.get() or 0
-
-
 @router.post("/chat", summary="AI对话")
 async def chat(
     request: ChatRequest,
-    user_id: int = Depends(get_current_user_id)
+    current_user = DependAuth
 ):
     """
     AI对话接口（流式响应）
@@ -34,20 +28,20 @@ async def chat(
     - 流式输出
     """
     service = AIService()
-    executor = ToolExecutor(user_id)
+    executor = ToolExecutor(current_user.id)
     
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
     
     return StreamingResponse(
-        service.chat(messages, user_id, executor),
-        media_type="text/event-stream",
+        service.chat(messages, current_user.id, executor),
+        media_type="application/x-ndjson",
     )
 
 
 @router.post("/confirm", summary="确认操作")
 async def confirm_operation(
     request: ConfirmationResponse,
-    user_id: int = Depends(get_current_user_id)
+    current_user = DependAuth
 ):
     """
     处理用户确认
@@ -55,16 +49,16 @@ async def confirm_operation(
     用户确认或取消待执行的操作
     """
     service = AIService()
-    executor = ToolExecutor(user_id)
+    executor = ToolExecutor(current_user.id)
     
     return StreamingResponse(
         service.handle_confirmation(
             operation_id=request.operation_id,
             confirmed=request.confirmed,
-            user_id=user_id,
+            user_id=current_user.id,
             executor=executor
         ),
-        media_type="text/event-stream",
+        media_type="application/x-ndjson",
     )
 
 

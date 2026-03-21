@@ -86,7 +86,7 @@ class ToolExecutor:
                 "id": s.get("id"),
                 "name": s.get("name"),
                 "phone": s.get("phone", "-"),
-                "status": "在读" if s.get("status") == "active" else "已停用"
+                "status": "在读" if s.get("is_active") else "已停用"
             }
             for s in students[:20]  # 最多返回20条
         ]
@@ -324,14 +324,130 @@ class ToolExecutor:
             "data": report
         }
     
+    async def _exec_get_current_time(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """获取当前时间"""
+        from datetime import datetime
+        
+        now = datetime.now()
+        return {
+            "success": True,
+            "message": "当前时间",
+            "data": {
+                "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "date": now.strftime("%Y-%m-%d"),
+                "time": now.strftime("%H:%M:%S"),
+                "year": now.year,
+                "month": now.month,
+                "day": now.day,
+                "weekday": now.weekday() + 1,  # 1=星期一，7=星期日
+                "weekday_name": ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][now.weekday()]
+            }
+        }
+    
+    async def _exec_get_weekday_dates(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """获取当月某星期几的所有日期"""
+        import calendar
+        from datetime import date
+        
+        weekday = args.get("weekday", 1)  # 1=星期一，7=星期日
+        
+        if weekday < 1 or weekday > 7:
+            return {
+                "success": False,
+                "message": "星期几必须在1-7之间（1=星期一，7=星期日）",
+                "data": None
+            }
+        
+        today = date.today()
+        year, month = today.year, today.month
+        
+        # 获取当月所有日期
+        month_calendar = calendar.monthcalendar(year, month)
+        
+        # Python的weekday: 0=星期一，6=星期日
+        # 用户输入: 1=星期一，7=星期日
+        python_weekday = weekday - 1
+        
+        dates = []
+        for week in month_calendar:
+            day = week[python_weekday]
+            if day != 0:  # 0表示该周没有这一天
+                dates.append(f"{year}-{month:02d}-{day:02d}")
+        
+        weekday_names = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        
+        return {
+            "success": True,
+            "message": f"{year}年{month}月共有 {len(dates)} 个{weekday_names[python_weekday]}",
+            "data": {
+                "year": year,
+                "month": month,
+                "weekday": weekday,
+                "weekday_name": weekday_names[python_weekday],
+                "dates": dates,
+                "count": len(dates)
+            }
+        }
+    
     # ==================== 写操作工具 ====================
+    
+    async def _exec_create_student(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """创建学生"""
+        from app.schemas.education import StudentCreate
+        
+        data = StudentCreate(
+            name=args.get("name"),
+            phone=args.get("phone"),
+            gender=args.get("gender"),
+            guardian=args.get("guardian"),
+            guardian_phone=args.get("guardian_phone"),
+            address=args.get("address"),
+            remark=args.get("remark")
+        )
+        
+        result = await self._student_controller.create(data)
+        
+        return {
+            "success": True,
+            "message": f"学生 '{args.get('name')}' 创建成功",
+            "data": {
+                "student_id": result.id,
+                "name": args.get("name")
+            }
+        }
+    
+    async def _exec_create_course(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """创建课程"""
+        from app.schemas.education import CourseCreate
+        from decimal import Decimal
+        
+        data = CourseCreate(
+            name=args.get("name"),
+            unit_price=Decimal(str(args.get("unit_price", 0))),
+            teacher=args.get("teacher"),
+            description=args.get("description")
+        )
+        
+        result = await self._course_controller.create(data)
+        
+        return {
+            "success": True,
+            "message": f"课程 '{args.get('name')}' 创建成功",
+            "data": {
+                "course_id": result.id,
+                "name": args.get("name"),
+                "unit_price": float(args.get("unit_price", 0))
+            }
+        }
     
     async def _exec_create_class_record(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """创建上课记录"""
+        from app.schemas.education import ClassRecordCreate, AttendanceCreate
+        
         student_name = args.get("student_name")
         course_name = args.get("course_name")
         class_date = args.get("class_date")
-        class_hours = args.get("class_hours")
+        class_hours = args.get("class_hours", 1)
         content = args.get("content", "")
         
         # 查询学生ID
@@ -346,25 +462,35 @@ class ToolExecutor:
             return {"success": False, "message": f"未找到课程: {course_name}", "data": None}
         course_id = courses[0]["id"]
         
-        # 创建记录
-        data = {
-            "student_id": student_id,
-            "course_id": course_id,
-            "class_date": class_date,
-            "class_hours": Decimal(str(class_hours)),
-            "content": content
-        }
+        # 解析日期
+        if isinstance(class_date, str):
+            class_date = date.fromisoformat(class_date)
         
-        result = await self._class_record_controller.create(data)
+        # 创建 ClassRecordCreate schema
+        data = ClassRecordCreate(
+            course_id=course_id,
+            class_date=class_date,
+            class_hours=Decimal(str(class_hours)),
+            content=content,
+            attendances=[
+                AttendanceCreate(
+                    student_id=student_id,
+                    actual_hours=Decimal(str(class_hours)),
+                    leave_hours=Decimal("0"),
+                )
+            ]
+        )
+        
+        result = await self._class_record_controller.create_with_attendance(data)
         
         return {
             "success": True,
             "message": "上课记录创建成功",
             "data": {
-                "record_id": result.get("id"),
+                "record_id": result.id,
                 "student": student_name,
                 "course": course_name,
-                "date": class_date,
+                "date": str(class_date),
                 "hours": class_hours
             }
         }
@@ -410,14 +536,8 @@ class ToolExecutor:
             return {"success": False, "message": f"未找到课程: {course_name}", "data": None}
         course_id = courses[0]["id"]
         
-        # 更新优惠金额
-        data = {
-            "student_id": student_id,
-            "course_id": course_id,
-            "discount": Decimal(str(discount))
-        }
-        
-        await self._course_controller.update_student(course_id, student_id, data)
+        # 更新优惠金额 - 直接传 discount 值，不是 dict
+        await self._course_controller.update_student(course_id, student_id, Decimal(str(discount)))
         
         return {
             "success": True,
@@ -435,6 +555,7 @@ class ToolExecutor:
         amount = args.get("amount")
         payment_method = args.get("payment_method")
         remark = args.get("remark", "")
+        payment_time = args.get("payment_time")  # 可选，默认当前时间
         
         # 查询学生ID
         students = await self._student_controller.get_list(name=student_name)
@@ -447,6 +568,7 @@ class ToolExecutor:
             "student_id": student_id,
             "amount": Decimal(str(amount)),
             "payment_method": payment_method,
+            "payment_time": payment_time or datetime.now(),  # 默认当前时间
             "remark": remark
         }
         
@@ -463,7 +585,7 @@ class ToolExecutor:
             "success": True,
             "message": "缴费登记成功",
             "data": {
-                "payment_id": result.get("id"),
+                "payment_id": result.id,
                 "student": student_name,
                 "amount": amount,
                 "method": method_map.get(payment_method, payment_method)
