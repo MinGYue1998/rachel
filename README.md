@@ -1,0 +1,1 @@
+记录一下，前后端包括部署纯ai生成，使用的是qoder和glm5。python+fastapi做的简易web后端管理项目。
